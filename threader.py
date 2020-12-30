@@ -87,29 +87,24 @@ def main():
         "y", "yes", "true", "1"]
     tweet_count = 0
 
-    credentials = {
-        "consumer_key": os.getenv("TWITTER_CONSUMER_KEY"),
-        "consumer_secret": os.getenv("TWITTER_CONSUMER_SECRET"),
-        "access_token": os.getenv("TWITTER_ACCESS_TOKEN"),
-        "access_secret": os.getenv("TWITTER_ACCESS_SECRET")
-    }
-
     auth = tweepy.OAuthHandler(
-        credentials["consumer_key"], credentials["consumer_secret"])
+        os.getenv("TWITTER_CONSUMER_KEY"), os.getenv("TWITTER_CONSUMER_SECRET"))
     auth.set_access_token(
-        credentials["access_token"], credentials["access_secret"])
+        os.getenv("TWITTER_ACCESS_TOKEN"), os.getenv("TWITTER_ACCESS_SECRET"))
 
     session = tweepy.API(auth)
+
+    if not session.verify_credentials():
+        die("Twitter API authentication failed. Make sure you renamed the .env.example file to .env and filled it with the appropriate api tokens.")
 
     last_tweet = None
 
     try:
         last_tweet = session.get_status(tweet_id)
     except tweepy.error.TweepError:
-        print("I wasn't able to fetch that tweet. Please try again!")
-        sys.exit()
+        die("I wasn't able to fetch that tweet. Please try again!")
     except Exception:
-        print("An unknown error occurred. Please try again!")
+        die("An unknown error occurred. Please try again!")
 
     input(
         f"Saving all media of thread by {last_tweet.user.screen_name} to {_outdir.absolute()}. {'Creating individual subdir for each tweet. ' if individual_dir else ''}Press any key to proceed... ")
