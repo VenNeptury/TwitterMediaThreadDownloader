@@ -139,11 +139,12 @@ if __name__ == "__main__":
         main()
     except KeyboardInterrupt:
         if not _outdir or _outdir == pathlib.Path.cwd():
-            die()
+            die(None, 130)
 
         delete_dir = input("\n\nExiting... Delete Download Directory? [y|N]...\n> ") in [
             "y", "yes", "true"]
         if delete_dir:
             from shutil import rmtree
             rmtree(_outdir)
+
         die(None, 130)
