@@ -5,6 +5,9 @@ import re
 import requests
 import pathlib
 
+from dotenv import load_dotenv
+load_dotenv()
+
 _img_count = 0
 _already_saved_img_count = 0
 _outdir = pathlib.Path.cwd()
@@ -85,10 +88,10 @@ def main():
     tweet_count = 0
 
     credentials = {
-        "consumer_key": os.getenv("TWITTER_API_KEY"),
-        "consumer_secret": os.getenv("TWITTER_API_KEY_SECRET"),
+        "consumer_key": os.getenv("TWITTER_CONSUMER_KEY"),
+        "consumer_secret": os.getenv("TWITTER_CONSUMER_SECRET"),
         "access_token": os.getenv("TWITTER_ACCESS_TOKEN"),
-        "access_secret": os.getenv("TWITTER_ACCESS_TOKEN_SECRET")
+        "access_secret": os.getenv("TWITTER_ACCESS_SECRET")
     }
 
     auth = tweepy.OAuthHandler(
@@ -143,7 +146,7 @@ if __name__ == "__main__":
         if not _outdir or _outdir == pathlib.Path.cwd():
             die()
 
-        delete_dir = input("Exiting... Delete Download Directory? [y|N]...\n> ") in [
+        delete_dir = input("\n\nExiting... Delete Download Directory? [y|N]...\n> ") in [
             "y", "yes", "true"]
         if delete_dir:
             from shutil import rmtree

@@ -4,6 +4,10 @@ Tool to download all images from a Twitter Thread
 
 ## Usage
 
+Rename the file `.env.example` to `.env` and fill it out with your twitter api tokens.
+
+Now run the following commands
+
 ```bash
 pip install -r requirements.txt
 
