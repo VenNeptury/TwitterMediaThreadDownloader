@@ -2,6 +2,8 @@
 
 Tool to download all images from a Twitter Thread
 
+> This is the OAuth branch. It requires your own API tokens. The master branch uses a public Twitter API guest token, so it works out of the box with no authorization. It might have a lower rate limit but I genuinely have no clue!
+
 ## Usage
 
 Rename the file `.env.example` to `.env` and fill it out with your twitter api tokens.
