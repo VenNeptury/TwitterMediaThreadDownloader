@@ -1,3 +1,7 @@
+# Since output might be in this folder, gitignore all directories
+**/
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

@@ -1,16 +1,11 @@
-import tweepy
+import typing
 import os
 import sys
 import re
 import requests
 import pathlib
-
-from dotenv import load_dotenv
-load_dotenv()
-
-_img_count = 0
-_already_saved_img_count = 0
-_outdir = pathlib.Path.cwd()
+import json
+import time
 
 
 def die(msg: str = None, code: int = 0):
@@ -19,132 +14,184 @@ def die(msg: str = None, code: int = 0):
     sys.exit(code)
 
 
-def downloadImages(status: tweepy.Status, outdir: pathlib.Path, individual_dir: bool):
-    global _img_count
-    global _already_saved_img_count
+class TwitterThreadDownloader:
+    _API_BASE = 'https://api.twitter.com/1.1/'
+    _GUEST_TOKEN = None
+    _COUNTS = {
+        "tweets": 0,
+        "images_saved": 0,
+        "already_saved": 0,
+    }
+    _OPTIONS = {
+        "tweet_id": None,
+        "outdir": pathlib.Path.cwd(),
+        "individual_dirs": False,
+        "authorization": 'Bearer AAAAAAAAAAAAAAAAAAAAAPYXBAAAAAAACLXUNDekMxqa8h%2F40K4moUkGsoc%3DTYfbDKbT3jJPCEVnMYqilB28NHfOPqkca3qaAxGfsyKCs0wRbw'
+    }
+    _CURSOR = None
 
-    images = [x["media_url"] for x in status.extended_entities["media"]]
+    def __init__(self, argv: typing.List[str]):
+        if len(sys.argv) == 1:
+            die(f"Usage: {argv[0]} <Last Tweet in Thread> [outdir] [whether to create separate dir for each tweet]")
 
-    final_dir = outdir
+        tweet_id = re.match(
+            "https://twitter.com/\w+/status/(\d+)", argv[1])
 
-    if individual_dir:
-        final_dir /= status.id_str
+        if tweet_id is None:
+            die("That doesn't seem to be a valid tweet. Please try again!")
+        else:
+            tweet_id = self._OPTIONS['tweet_id'] = tweet_id.group(1)
+
+        if len(sys.argv) >= 3:
+            custom_path = pathlib.Path(sys.argv[2])
+            self._OPTIONS["outdir"] = custom_path if custom_path.is_absolute else self._OPTIONS["outdir"] / custom_path
+        else:
+            self._OPTIONS["outdir"] /= tweet_id
 
         try:
-            final_dir.mkdir()
-        except FileExistsError:
-            file_count = len(list(final_dir.glob("*")))
-            if file_count == len(images):
-                _already_saved_img_count += file_count
-                print(f"Tweet already downloaded. Skipping...")
-                return
+            self._OPTIONS['outdir'].mkdir(exist_ok=True)
+        except Exception as e:
+            die(f'Something went wrong while creating the directory: {e}')
+
+        self._OPTIONS['individual_dirs'] = len(argv) > 3 and argv[3].lower() in [
+            "y", "yes", "true", "1"]
+
+    def request_json(self, endpoint: str, method: str = "get", **kwargs):
+        res = None
+        try:
+            fetch_method = requests.get if method.lower() != "post" else requests.post
+            res = fetch_method(self._API_BASE + endpoint, **kwargs)
+            return json.loads(res.content)
+        except json.JSONDecodeError as err:
+            print(
+                f'An error occurred while parsing json from {endpoint} -> {err}\n\nRaw json: {res.content if res else "-"}')
+        except requests.exceptions.RequestException as err:
+            print(f"An error occurred while fetching {endpoint} -> {err}")
+
+    def get_tweet(self, tweet_id: str):
+        headers = {
+            'Authorization': self._OPTIONS["authorization"],
+        }
+
+        if self._GUEST_TOKEN is None:
+            res = self.request_json(
+                'guest/activate.json', "post", headers=headers)
+            self._GUEST_TOKEN = res['guest_token']
+
+        headers['x-guest-token'] = self._GUEST_TOKEN
+        return self.request_json(f'statuses/show.json?id={tweet_id}', headers=headers)
+
+    def download_media(self, status):
+        images = [x["media_url"] for x in status['extended_entities']['media']]
+
+        final_dir = self._OPTIONS["outdir"]
+        individual_mode = self._OPTIONS['individual_dirs']
+        count = 0
+        dir_name = None
+
+        try:
+            dir_name = re.sub('[^A-Za-z0-9]|https://t.co/\w+',
+                              "", status['text'])[: 30]
+            if not len(dir_name):
+                raise Exception
+        except:
+            dir_name = status['id_str']
             pass
 
-    for i, img in enumerate(images):
-        res = requests.get(img)
+        if individual_mode:
+            final_dir /= dir_name
 
-        file_name = f"{i+1}{os.path.splitext(img)[1]}"
-
-        if not individual_dir:
-            file_name = status.id_str + file_name
-
-        final_path = final_dir / file_name
-        if final_path.exists():
-            _already_saved_img_count += 1
-            continue
-
-        with open(final_path, "w+b") as f:
-            f.write(res.content)
-            _img_count += 1
-
-
-def main():
-    global _outdir
-
-    if len(sys.argv) == 1:
-        die(f"Usage: {sys.argv[0]} <Last Tweet in Thread> [outdir] [whether to create separate dir for each tweet]")
-
-    tweet_id = re.match(
-        "https://twitter.com/\w+/status/(\d+)", sys.argv[1])
-
-    if not tweet_id:
-        die("That doesn't seem to be a valid tweet. Please try again!")
-    else:
-        tweet_id = tweet_id.group(1)
-
-    if len(sys.argv) >= 3:
-        custom_path = pathlib.Path(sys.argv[2])
-        _outdir = custom_path if custom_path.is_absolute else _outdir / custom_path
-    else:
-        _outdir /= tweet_id
-
-    try:
-        _outdir.mkdir(exist_ok=True)
-    except Exception as e:
-        die(f"Something went wrong while creating the directory: {e}")
-
-    individual_dir = len(sys.argv) > 3 and sys.argv[3].lower() in [
-        "y", "yes", "true", "1"]
-    tweet_count = 0
-
-    auth = tweepy.OAuthHandler(
-        os.getenv("TWITTER_CONSUMER_KEY"), os.getenv("TWITTER_CONSUMER_SECRET"))
-    auth.set_access_token(
-        os.getenv("TWITTER_ACCESS_TOKEN"), os.getenv("TWITTER_ACCESS_SECRET"))
-
-    session = tweepy.API(auth)
-
-    if not session.verify_credentials():
-        die("Twitter API authentication failed. Make sure you renamed the .env.example file to .env and filled it with the appropriate api tokens.")
-
-    last_tweet = None
-
-    try:
-        last_tweet = session.get_status(tweet_id)
-    except tweepy.error.TweepError:
-        die("I wasn't able to fetch that tweet. Please try again!")
-    except Exception:
-        die("An unknown error occurred. Please try again!")
-
-    input(
-        f"Saving all media of thread by {last_tweet.user.screen_name} to {_outdir.absolute()}. {'Creating individual subdir for each tweet. ' if individual_dir else ''}Press any key to proceed... ")
-
-    while 1:
-        tweet_count += 1
-
-        if not last_tweet.extended_entities:
-            print("Found tweet with no media. Skipping...")
-        else:
-            print(
-                f"Found tweet with {len(last_tweet.extended_entities['media'])} images. Downloading...")
             try:
-                downloadImages(last_tweet, _outdir, individual_dir)
-            except Exception as e:
-                print(f"Something went wrong. Carrying on... (Error: {e})")
+                final_dir.mkdir()
+            except FileExistsError:
+                file_count = len(list(final_dir.glob("*")))
+                if file_count == len(images):
+                    self._COUNTS["already_saved"] += file_count
+                    print(f"Tweet already downloaded. Skipping...")
+                    return 0
+                pass
 
-        if not last_tweet.in_reply_to_status_id:
-            break
+        for i, img in enumerate(images):
+            file_ext = os.path.splitext(img)[1]
+            file_name = f'{i+1}{file_ext}'
 
-        last_tweet = session.get_status(last_tweet.in_reply_to_status_id)
+            if not individual_mode:
+                file_name = dir_name + "-" + file_name
 
-    print(
-        f"Finished downloading. Handled {tweet_count} tweets and downloaded {_img_count} images.")
-    if _already_saved_img_count:
-        print(
-            f"Skipped {_already_saved_img_count} images because they were already downloaded.")
+            final_path = final_dir / file_name
+            if final_path.exists():
+                self._COUNTS["already_saved"] += 1
+                continue
+
+            res = requests.get(img)
+
+            with open(final_path, "w+b") as f:
+                f.write(res.content)
+                count += 1
+
+        self._COUNTS["images_saved"] += count
+
+        return count
+
+    def download(self):
+        cursor = self._CURSOR = self.get_tweet(self._OPTIONS['tweet_id'])
+        if cursor is None:
+            die()
+
+        input(f'Saving all media of thread by {cursor["user"]["screen_name"]} to {self._OPTIONS["outdir"].absolute()}.\n' +
+              ("Creating individual subdir for each tweet. " if self._OPTIONS[
+                  "individual_dirs"] else "") +
+              'Press any key to proceed...')
+
+        chunk = 0
+        while 1:
+            self._COUNTS["tweets"] += 1
+            chunk += 1
+
+            tweet_url = f'https://twitter.com/i/status/{cursor["id_str"]}'
+            if 'extended_entities' not in cursor or not cursor['extended_entities']:
+                print(f"Found tweet {tweet_url} with no media. Skipping...")
+            else:
+                print(
+                    f'Found tweet {tweet_url} with {len(cursor["extended_entities"]["media"])} images. Downloading...')
+                try:
+                    self.download_media(cursor)
+                except Exception as e:
+                    print(f"Something went wrong. Carrying on... (Error: {e})")
+
+            if not 'in_reply_to_status_id' in cursor or not cursor['in_reply_to_status_id']:
+                break
+
+            if chunk == 10:
+                print(f"Finished fetching 10 tweets. Pausing for a bit...")
+                time.sleep(5)
+                chunk = 0
+            cursor = self.get_tweet(cursor['in_reply_to_status_id'])
+
+        print((
+            'Finished downloading.'
+            f'Handled {self._COUNTS["tweets"]} tweets and downloaded {self._COUNTS["images_saved"]} images'
+        ))
+        if self._COUNTS["already_saved"]:
+            print(
+                f'Skipped {self._COUNTS["already_saved"]} images because they were already downloaded.')
+
+    def cleanup(self):
+        from shutil import rmtree
+        rmtree(self._OPTIONS['outdir'])
 
 
 if __name__ == "__main__":
+    threader = TwitterThreadDownloader(sys.argv)
     try:
-        main()
+        threader.download()
     except KeyboardInterrupt:
-        if not _outdir or _outdir == pathlib.Path.cwd():
+        if threader._OPTIONS['outdir'] == pathlib.Path.cwd():
             die(None, 130)
 
         delete_dir = input("\n\nExiting... Delete Download Directory? [y|N]...\n> ") in [
             "y", "yes", "true"]
         if delete_dir:
-            from shutil import rmtree
-            rmtree(_outdir)
+            threader.cleanup()
 
         die(None, 130)
